@@ -1,8 +1,11 @@
 from jaxtyping import Float
 from omegaconf import DictConfig
 from torch import Tensor
+import torch
 
 from .field import Field
+
+from src.components.positional_encoding import PositionalEncoding
 
 
 class FieldMLP(Field):
@@ -24,7 +27,24 @@ class FieldMLP(Field):
         """
 
         super().__init__(cfg, d_coordinate, d_out)
-        raise NotImplementedError("This is your homework.")
+
+        self.encoder = None
+        first_layer_in = d_coordinate
+
+        if cfg.positional_encoding_octaves is not None:
+            self.encoder = PositionalEncoding(cfg.positional_encoding_octaves)
+            first_layer_in = int(self.encoder.d_out(d_coordinate))
+            
+        # add hidden layers
+        self.d_hidden = cfg.d_hidden
+        layers = []
+        layers = [torch.nn.Linear(first_layer_in,cfg.d_hidden)]
+        for _ in range(max(0,cfg.num_hidden_layers)):           
+            layers.append(torch.nn.Linear(cfg.d_hidden,cfg.d_hidden))
+            layers.append(torch.nn.ReLU())
+        layers.append(torch.nn.Linear(cfg.d_hidden,d_out))
+        
+        self.model = torch.nn.Sequential(*layers)
 
     def forward(
         self,
@@ -32,4 +52,11 @@ class FieldMLP(Field):
     ) -> Float[Tensor, "batch output_dim"]:
         """Evaluate the MLP at the specified coordinates."""
 
-        raise NotImplementedError("This is your homework.")
+        input_coords = coordinates
+
+        if self.encoder is not None:
+            input_coords = self.encoder.forward(input_coords)
+
+        result = self.model(input_coords)
+
+        return result

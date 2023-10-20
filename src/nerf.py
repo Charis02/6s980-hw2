@@ -3,6 +3,7 @@ from omegaconf import DictConfig
 from torch import Tensor, nn
 
 from .field.field import Field
+import torch
 
 
 class NeRF(nn.Module):
@@ -13,6 +14,8 @@ class NeRF(nn.Module):
         super().__init__()
         self.cfg = cfg
         self.field = field
+        self.num_samples = cfg.num_samples
+        self.relu = torch.nn.ReLU()
 
     def forward(
         self,
@@ -32,7 +35,15 @@ class NeRF(nn.Module):
         4. Composite these alpha values together with the evaluated colors from.
         """
 
-        raise NotImplementedError("This is your homework.")
+        samples,boundaries = self.generate_samples(origins,directions,near,far,self.num_samples)
+        samples_stacked = samples.view(-1,3)    # -1 infers the remaining dimension
+        field_values = torch.exp(self.field(samples_stacked))
+        sigmas = field_values[:,-1:].view(-1,self.num_samples)
+        colors = field_values[:,:-1].unsqueeze(2).view(-1,self.num_samples,3)
+        alphas = self.compute_alpha_values(sigmas,boundaries)
+        
+        radiances = self.alpha_composite(alphas,colors)
+        return radiances
 
     def generate_samples(
         self,
@@ -50,9 +61,24 @@ class NeRF(nn.Module):
         endpoints at the near and far planes). Also return sample locations, which fall
         at the midpoints of the segments.
         """
-
-        raise NotImplementedError("This is your homework.")
-
+        
+        sample_boundaries = torch.linspace(near,far,num_samples+1)
+        sample_locations = sample_boundaries.clone()
+        sample_locations = (sample_locations[1:] + sample_locations[:-1])*0.5
+        
+        batch_size = origins.shape[0]
+        sample_locations = sample_locations.unsqueeze(0).expand(batch_size,-1)
+        origins = origins.unsqueeze(2).expand(-1,-1,num_samples)
+ 
+        normalized_directions = torch.nn.functional.normalize(directions, dim=-1, p=2)
+        scaled_directions = torch.einsum("...j , ...i -> ...ij",sample_locations,normalized_directions)
+        
+        sample_locations_3d = origins + scaled_directions
+        sample_locations_3d = sample_locations_3d.swapaxes(1,2)
+        sample_boundaries = sample_boundaries.unsqueeze(0).expand(batch_size,-1)
+        
+        return sample_locations_3d, sample_boundaries
+    
     def compute_alpha_values(
         self,
         sigma: Float[Tensor, "batch sample"],
@@ -62,7 +88,10 @@ class NeRF(nn.Module):
         boundaries.
         """
 
-        raise NotImplementedError("This is your homework.")
+        deltas = boundaries[...,1:] - boundaries[...,:-1]
+        alphas = 1 - torch.exp(-sigma*deltas)
+
+        return alphas
 
     def alpha_composite(
         self,
@@ -73,4 +102,8 @@ class NeRF(nn.Module):
         background is black.
         """
 
-        raise NotImplementedError("This is your homework.")
+        to_mult = 1 - alphas
+        T = torch.cumprod(to_mult, dim=-1)
+        w = T * alphas
+        c = torch.einsum("ij,ij...->i...", w, colors)
+        return c

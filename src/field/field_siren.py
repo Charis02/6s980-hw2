@@ -3,6 +3,7 @@ from omegaconf import DictConfig
 from torch import Tensor, nn
 
 from .field import Field
+from src.components.sine_layer import SineLayer
 
 
 class FieldSiren(Field):
@@ -22,7 +23,14 @@ class FieldSiren(Field):
         - An output linear layer
         """
         super().__init__(cfg, d_coordinate, d_out)
-        raise NotImplementedError("This is your homework.")
+        
+        layers = []
+        layers.append(SineLayer(d_coordinate,256,is_first=True))
+        layers.append(SineLayer(256,256))
+        layers.append(SineLayer(256,256))
+        layers.append(nn.Linear(256,d_out))
+
+        self.model = nn.Sequential(*layers)
 
     def forward(
         self,
@@ -30,4 +38,4 @@ class FieldSiren(Field):
     ) -> Float[Tensor, "batch output_dim"]:
         """Evaluate the MLP at the specified coordinates."""
 
-        raise NotImplementedError("This is your homework.")
+        return self.model(coordinates)

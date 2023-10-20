@@ -1,6 +1,7 @@
 from jaxtyping import Float
 from omegaconf import DictConfig
 from torch import Tensor
+import torch
 
 from .field import Field
 
@@ -21,7 +22,14 @@ class FieldGrid(Field):
         """
         super().__init__(cfg, d_coordinate, d_out)
         assert d_coordinate in (2, 3)
-        raise NotImplementedError("This is your homework.")
+        side_length = cfg.side_length
+        self.side_length = side_length
+        self.d_out = d_out
+        
+        if d_coordinate == 2:
+            self.grid = torch.nn.Parameter(torch.randn((1, self.d_out, side_length, side_length)))  # Create a 2D grid
+        else:  # d_coordinate = 3
+            self.grid = torch.nn.Parameter(torch.randn((1, self.d_out, side_length, side_length, side_length)))  # Create a 3D grid
 
     def forward(
         self,
@@ -32,4 +40,18 @@ class FieldGrid(Field):
         depending on what d_coordinate was during initialization.
         """
 
-        raise NotImplementedError("This is your homework.")
+        coordinates = coordinates*2 - 1 # from [0,1] to [-1,1]
+
+        if self.d_coordinate == 2:
+            reshaped_coords = coordinates.view(coordinates.size(0),1,1,2)
+            grid_to_sample = self.grid.expand(coordinates.size(0),self.d_out,self.side_length,self.side_length)
+            result =  torch.nn.functional.grid_sample(grid_to_sample,reshaped_coords,align_corners=True) # look at documentation, takes weird shape
+            result = result.squeeze()
+            #print("HERE! shape is",result.shape)
+        else:  # d_coordinate = 3
+            coordinates = coordinates.view(coordinates.size(0), 1, 1, 1, 3)
+            grid_to_sample = self.grid.expand(coordinates.size(0), self.d_out, self.side_length,self.side_length,self.side_length)
+            result = torch.nn.functional.grid_sample(self.grid, coordinates [..., :2])
+            result = result.squeeze()
+
+        return result
